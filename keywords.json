@@ -1,35 +1,86 @@
 {
   "977054521035472906": [
-    "707"
+    {
+      "keyword": "707",
+      "channelId": null
+    }
   ],
   "286980592623681537": [
-    "stranden",
-    "imminent"
+    {
+      "keyword": "stranden",
+      "channelId": null
+    },
+    {
+      "keyword": "imminent",
+      "channelId": null
+    }
   ],
   "324652470565601280": [
-    "otg",
-    "observed",
-    "pds",
-    "sigma"
+    {
+      "keyword": "otg",
+      "channelId": null
+    },
+    {
+      "keyword": "observed",
+      "channelId": null
+    },
+    {
+      "keyword": "pds",
+      "channelId": null
+    },
+    {
+      "keyword": "sigma",
+      "channelId": null
+    }
   ],
   "610660046128283670": [
-    "forrest",
-    "otg",
-    "observed"
+    {
+      "keyword": "forrest",
+      "channelId": null
+    },
+    {
+      "keyword": "otg",
+      "channelId": null
+    },
+    {
+      "keyword": "observed",
+      "channelId": null
+    }
   ],
   "970859736838844416": [
-    "tamster"
+    {
+      "keyword": "tamster",
+      "channelId": null
+    }
   ],
   "1183236283263352934": [
-    "seal"
+    {
+      "keyword": "seal",
+      "channelId": null
+    }
   ],
   "334343661938802698": [
-    "wedge",
-    "otg",
-    "confirmed"
+    {
+      "keyword": "wedge",
+      "channelId": null
+    },
+    {
+      "keyword": "otg",
+      "channelId": null
+    },
+    {
+      "keyword": "confirmed",
+      "channelId": null
+    }
   ],
   "664632656155377684": [
-    "ava",
-    "tornado"
+    {
+      "keyword": "ava",
+      "channelId": null
+    },
+    {
+      "keyword": "tornado",
+      "channelId": null
+    }
   ]
 }

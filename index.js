@@ -44,37 +44,91 @@ client.on('messageCreate', async (message) => {
 
     // Command to add a keyword
     if (message.content.startsWith('!addkeyword ')) {
-        const keyword = message.content.split(' ').slice(1).join(' ').toLowerCase();
-        if (!userKeywords[userId]) userKeywords[userId] = [];
-        if (!userKeywords[userId].includes(keyword)) {
-            userKeywords[userId].push(keyword);
-            fs.writeFileSync(KEYWORDS_FILE, JSON.stringify(userKeywords, null, 2));
-            message.reply(`Added keyword: ${keyword}`);
+        const parts = message.content.split(' ');
+        let keyword;
+        let channelIdToLimit = null;
+
+        const channelMention = parts[parts.length - 1].match(/^<#(\d+)>$/);
+        if (channelMention) {
+            channelIdToLimit = channelMention[1];
+            keyword = parts.slice(1, -1).join(' ').toLowerCase();
         } else {
-            message.reply('That keyword is already being tracked.');
+            keyword = parts.slice(1).join(' ').toLowerCase();
+        }
+
+        if (!userKeywords[userId]) userKeywords[userId] = [];
+        
+        const alreadyExists = userKeywords[userId].some(kwObj => 
+            kwObj.keyword === keyword && kwObj.channelId === channelIdToLimit
+        );
+
+        if (!alreadyExists) {
+            userKeywords[userId].push({ keyword: keyword, channelId: channelIdToLimit });
+            fs.writeFileSync(KEYWORDS_FILE, JSON.stringify(userKeywords, null, 2));
+            const channelText = channelIdToLimit ? ` in <#${channelIdToLimit}>` : "";
+            message.reply(`Added keyword: **${keyword}**${channelText}`);
+        } else {
+            message.reply('That keyword is already being tracked with those settings.');
         }
         return;
     }
 
     // Command to remove a keyword
     if (message.content.startsWith('!removekeyword ')) {
-        const keyword = message.content.split(' ').slice(1).join(' ').toLowerCase();
-        if (userKeywords[userId] && userKeywords[userId].includes(keyword)) {
-            userKeywords[userId] = userKeywords[userId].filter(word => word !== keyword);
-            fs.writeFileSync(KEYWORDS_FILE, JSON.stringify(userKeywords, null, 2));
-            message.reply(`Removed keyword: ${keyword}`);
+        const parts = message.content.split(' ');
+        let keyword;
+        let channelIdToRemove = null;
+
+        const channelMention = parts[parts.length - 1].match(/^<#(\d+)>$/);
+        if (channelMention) {
+            channelIdToRemove = channelMention[1];
+            keyword = parts.slice(1, -1).join(' ').toLowerCase();
         } else {
-            message.reply('That keyword is not in your list.');
+            keyword = parts.slice(1).join(' ').toLowerCase();
+        }
+
+        if (userKeywords[userId]) {
+            const originalLength = userKeywords[userId].length;
+            userKeywords[userId] = userKeywords[userId].filter(kwObj => 
+                !(kwObj.keyword === keyword && kwObj.channelId === channelIdToRemove)
+            );
+            
+            if (userKeywords[userId].length < originalLength) {
+                fs.writeFileSync(KEYWORDS_FILE, JSON.stringify(userKeywords, null, 2));
+                const channelText = channelIdToRemove ? ` in <#${channelIdToRemove}>` : "";
+                message.reply(`Removed keyword: **${keyword}**${channelText}`);
+            } else {
+                message.reply('That keyword was not in your list.');
+            }
+        } else {
+            message.reply('You have no keywords.');
+        }
+        return;
+    }
+
+    // Command to list keywords
+    if (message.content === '!listkeywords') {
+        if (userKeywords[userId] && userKeywords[userId].length > 0) {
+            const list = userKeywords[userId].map(kw => 
+                `- **${kw.keyword}**${kw.channelId ? ` in <#${kw.channelId}>` : ""}`
+            ).join('\n');
+            message.reply(`Your keywords:\n${list}`);
+        } else {
+            message.reply('You have no keywords tracked.');
         }
         return;
     }
 
     // Check for keyword alerts for all tracked users
-    Object.entries(userKeywords).forEach(async ([trackedUser, keywords]) => {
+    Object.entries(userKeywords).forEach(async ([trackedUser, userKeywordList]) => {
         if (trackedUser === userId) return;
 
-        // Ensure keywords match whole words only
-        if (!keywords.some(word => new RegExp(`\\b${word}\\b`, 'i').test(message.content))) return;
+        const foundKeywordObj = userKeywordList.find(kwObj => {
+            if (kwObj.channelId && kwObj.channelId !== channelId) return false;
+            return new RegExp(`\\b${kwObj.keyword}\\b`, 'i').test(message.content);
+        });
+
+        if (!foundKeywordObj) return;
 
         const guildMember = message.guild.members.cache.get(trackedUser);
         if (!guildMember) {
@@ -89,16 +143,15 @@ client.on('messageCreate', async (message) => {
         }
 
         try {
-            const foundKeyword = keywords.find(word => new RegExp(`\\b${word}\\b`, 'i').test(message.content));
             const messageLink = `https://discord.com/channels/${message.guild.id}/${message.channel.id}/${message.id}`;
 
             const embed = new EmbedBuilder()
                 .setColor(0x5865F2)
                 .setAuthor({
-                    name: `In ${message.guild.name} • #${message.channel.name}`,
+                    name: `In ${message.guild.name} â€¢ #${message.channel.name}`,
                     iconURL: message.guild.iconURL() || ''
                 })
-                .setDescription(`You were highlighted with the word: **${foundKeyword}**`)
+                .setDescription(`You were highlighted with the word: **${foundKeywordObj.keyword}**`)
                 .addFields(
                     { name: `${message.author.tag}`, value: message.content || '*No message content*' },
                     { name: 'Source Message', value: `[Click to jump](${messageLink})` }
@@ -108,7 +161,7 @@ client.on('messageCreate', async (message) => {
 
             const userObj = await client.users.fetch(trackedUser);
             await userObj.send({ embeds: [embed] });
-            console.log(`Sent DM to ${userObj.tag} for keyword "${foundKeyword}" in channel ${message.channel.name}.`);
+            console.log(`Sent DM to ${userObj.tag} for keyword "${foundKeywordObj.keyword}" in channel ${message.channel.name}.`);
         } catch (error) {
             console.error(`DEBUG: Could not send DM to user ${trackedUser}: ${error}`);
         }
