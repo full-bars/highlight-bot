@@ -134,27 +134,33 @@ const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
 
 client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}!`);
-    try {
-        console.log('--- Deep Cleaning Slash Commands ---');
-        
-        // 1. Clear Global Commands
-        await rest.put(Routes.applicationCommands(client.user.id), { body: [] });
-        console.log('Cleared all global commands.');
+    
+    // Only refresh commands if the environment variable is explicitly set
+    // This prevents accidental duplication if the bot restarts frequently
+    if (process.env.REFRESH_COMMANDS === 'true') {
+        try {
+            console.log('--- COMMAND REFRESH INITIATED ---');
+            
+            // 1. Clear all Guild Commands (most common source of duplicates)
+            for (const [id, guild] of client.guilds.cache) {
+                try {
+                    await rest.put(Routes.applicationGuildCommands(client.user.id, guild.id), { body: [] });
+                    console.log(`Cleared guild-level commands for: ${guild.name}`);
+                } catch (e) { /* Ignore guilds with missing perms */ }
+            }
 
-        // 2. Clear all Guild Commands
-        for (const [id, guild] of client.guilds.cache) {
-            try {
-                await rest.put(Routes.applicationGuildCommands(client.user.id, guild.id), { body: [] });
-                console.log(`Cleared commands for guild: ${guild.name}`);
-            } catch (e) { /* Ignore */ }
+            // 2. Refresh Global Commands (this replaces the old global list entirely)
+            console.log('Refreshing global commands...');
+            await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
+            console.log('Global commands successfully reloaded.');
+            
+            console.log('--- REFRESH COMPLETE: Please restart your Discord client (Ctrl+R) if duplicates persist ---');
+        } catch (e) { 
+            console.error('Command refresh failed:', e); 
         }
-
-        // 3. Re-register only Global Commands
-        console.log('Re-registering global commands...');
-        await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-        console.log('Deep clean complete. Only global commands should remain.');
-
-    } catch (e) { console.error('Deep clean failed:', e); }
+    } else {
+        console.log('Skipping command refresh (set REFRESH_COMMANDS=true to force update).');
+    }
 });
 
 // --- HELPER FUNCTIONS ---
