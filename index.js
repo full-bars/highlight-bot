@@ -44,7 +44,7 @@ const recentTypers = new Map();
 
 // --- SLASH COMMANDS DEFINITION ---
 const keywordCommandDefinition = new SlashCommandBuilder()
-    .setName('keywords')
+    .setName('keyword')
     .setDescription('Manage your keywords')
     .addSubcommand(sub => sub
         .setName('add')
@@ -81,12 +81,6 @@ const keywordCommandDefinition = new SlashCommandBuilder()
 
 const commands = [
     keywordCommandDefinition,
-    // Add singular alias
-    new SlashCommandBuilder().setName('keyword').setDescription('Alias for /keywords')
-        .addSubcommand(sub => sub.setName('add').setDescription('Add a keyword').addStringOption(opt => opt.setName('keyword').setDescription('Keyword to track').setRequired(true)).addChannelOption(opt => opt.setName('channel').setDescription('Select a channel from the list').addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement, ChannelType.GuildVoice, ChannelType.GuildStageVoice, ChannelType.PublicThread, ChannelType.PrivateThread, ChannelType.AnnouncementThread, ChannelType.GuildForum, ChannelType.GuildMedia)).addStringOption(opt => opt.setName('channel_id').setDescription('OR paste a channel ID directly')).addStringOption(opt => opt.setName('ai_context').setDescription('AI filtering (e.g., "only actual emergency reports")')).addStringOption(opt => opt.setName('mode').setDescription('Matching mode').addChoices({ name: 'Strict (Whole Word)', value: 'strict' }, { name: 'Loose (Anywhere)', value: 'loose' }, { name: 'Exact (Case Sensitive)', value: 'exact' })).addIntegerOption(opt => opt.setName('cooldown').setDescription('Cooldown in minutes')))
-        .addSubcommand(sub => sub.setName('remove').setDescription('Remove a keyword').addStringOption(opt => opt.setName('keyword').setDescription('Keyword to remove').setRequired(true).setAutocomplete(true)).addChannelOption(opt => opt.setName('channel').setDescription('Channel setting it was saved with')).addStringOption(opt => opt.setName('channel_id').setDescription('OR paste a channel ID')))
-        .addSubcommand(sub => sub.setName('list').setDescription('List your keywords')),
-
     new SlashCommandBuilder()
         .setName('settings')
         .setDescription('Bot settings')

@@ -20,7 +20,7 @@ A powerful, AI-enhanced Discord notification bot that DMs you when specific keyw
 
 ## 🛠 Commands
 
-### `/keywords` or `/keyword`
+### `/keyword`
 - `add <keyword> [channel] [channel_id] [ai_context] [mode] [cooldown]`: Add a new keyword.
 - `remove <keyword> [channel] [channel_id]`: Stop tracking a keyword (autocomplete supported).
 - `list`: Show all your tracked keywords and their settings.
