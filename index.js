@@ -135,18 +135,26 @@ const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
 client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}!`);
     try {
-        console.log('Started refreshing application (/) commands globally.');
-        await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-        console.log('Successfully reloaded application (/) commands globally.');
+        console.log('--- Deep Cleaning Slash Commands ---');
+        
+        // 1. Clear Global Commands
+        await rest.put(Routes.applicationCommands(client.user.id), { body: [] });
+        console.log('Cleared all global commands.');
 
-        // Clear guild-level commands to prevent duplicates
-        client.guilds.cache.forEach(async (guild) => {
+        // 2. Clear all Guild Commands
+        for (const [id, guild] of client.guilds.cache) {
             try {
                 await rest.put(Routes.applicationGuildCommands(client.user.id, guild.id), { body: [] });
-            } catch (e) { /* Ignore errors for guilds where we lack perms */ }
-        });
+                console.log(`Cleared commands for guild: ${guild.name}`);
+            } catch (e) { /* Ignore */ }
+        }
 
-    } catch (e) { console.error(e); }
+        // 3. Re-register only Global Commands
+        console.log('Re-registering global commands...');
+        await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
+        console.log('Deep clean complete. Only global commands should remain.');
+
+    } catch (e) { console.error('Deep clean failed:', e); }
 });
 
 // --- HELPER FUNCTIONS ---
