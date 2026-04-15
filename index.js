@@ -43,30 +43,49 @@ const recentMessages = new Map();
 const recentTypers = new Map();
 
 // --- SLASH COMMANDS DEFINITION ---
+const keywordCommandDefinition = new SlashCommandBuilder()
+    .setName('keywords')
+    .setDescription('Manage your keywords')
+    .addSubcommand(sub => sub
+        .setName('add')
+        .setDescription('Add a keyword')
+        .addStringOption(opt => opt.setName('keyword').setDescription('Keyword to track').setRequired(true))
+        .addChannelOption(opt => opt.setName('channel').setDescription('Select a channel from the list').addChannelTypes(
+            ChannelType.GuildText, 
+            ChannelType.GuildAnnouncement, 
+            ChannelType.GuildVoice, 
+            ChannelType.GuildStageVoice, 
+            ChannelType.PublicThread, 
+            ChannelType.PrivateThread, 
+            ChannelType.AnnouncementThread,
+            ChannelType.GuildForum,
+            ChannelType.GuildMedia
+        ))
+        .addStringOption(opt => opt.setName('channel_id').setDescription('OR paste a channel ID directly if it won\'t show up in the list'))
+        .addStringOption(opt => opt.setName('ai_context').setDescription('AI filtering (e.g., "only actual emergency reports")'))
+        .addStringOption(opt => opt.setName('mode').setDescription('Matching mode').addChoices(
+            { name: 'Strict (Whole Word)', value: 'strict' },
+            { name: 'Loose (Anywhere)', value: 'loose' },
+            { name: 'Exact (Case Sensitive)', value: 'exact' }
+        ))
+        .addIntegerOption(opt => opt.setName('cooldown').setDescription('Cooldown in minutes')))
+    .addSubcommand(sub => sub
+        .setName('remove')
+        .setDescription('Remove a keyword')
+        .addStringOption(opt => opt.setName('keyword').setDescription('Keyword to remove').setRequired(true).setAutocomplete(true))
+        .addChannelOption(opt => opt.setName('channel').setDescription('Channel setting it was saved with'))
+        .addStringOption(opt => opt.setName('channel_id').setDescription('OR paste a channel ID if it was saved with one')))
+    .addSubcommand(sub => sub
+        .setName('list')
+        .setDescription('List your keywords'));
+
 const commands = [
-    new SlashCommandBuilder()
-        .setName('keywords')
-        .setDescription('Manage your keywords')
-        .addSubcommand(sub => sub
-            .setName('add')
-            .setDescription('Add a keyword')
-            .addStringOption(opt => opt.setName('keyword').setDescription('Keyword to track').setRequired(true))
-            .addChannelOption(opt => opt.setName('channel').setDescription('Specific channel only').addChannelTypes(ChannelType.GuildText))
-            .addStringOption(opt => opt.setName('ai_context').setDescription('AI filtering (e.g., "only actual emergency reports")'))
-            .addStringOption(opt => opt.setName('mode').setDescription('Matching mode').addChoices(
-                { name: 'Strict (Whole Word)', value: 'strict' },
-                { name: 'Loose (Anywhere)', value: 'loose' },
-                { name: 'Exact (Case Sensitive)', value: 'exact' }
-            ))
-            .addIntegerOption(opt => opt.setName('cooldown').setDescription('Cooldown in minutes')))
-        .addSubcommand(sub => sub
-            .setName('remove')
-            .setDescription('Remove a keyword')
-            .addStringOption(opt => opt.setName('keyword').setDescription('Keyword to remove').setRequired(true))
-            .addChannelOption(opt => opt.setName('channel').setDescription('Channel setting it was saved with')))
-        .addSubcommand(sub => sub
-            .setName('list')
-            .setDescription('List your keywords')),
+    keywordCommandDefinition,
+    // Add singular alias
+    new SlashCommandBuilder().setName('keyword').setDescription('Alias for /keywords')
+        .addSubcommand(sub => sub.setName('add').setDescription('Add a keyword').addStringOption(opt => opt.setName('keyword').setDescription('Keyword to track').setRequired(true)).addChannelOption(opt => opt.setName('channel').setDescription('Select a channel from the list').addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement, ChannelType.GuildVoice, ChannelType.GuildStageVoice, ChannelType.PublicThread, ChannelType.PrivateThread, ChannelType.AnnouncementThread, ChannelType.GuildForum, ChannelType.GuildMedia)).addStringOption(opt => opt.setName('channel_id').setDescription('OR paste a channel ID directly')).addStringOption(opt => opt.setName('ai_context').setDescription('AI filtering (e.g., "only actual emergency reports")')).addStringOption(opt => opt.setName('mode').setDescription('Matching mode').addChoices({ name: 'Strict (Whole Word)', value: 'strict' }, { name: 'Loose (Anywhere)', value: 'loose' }, { name: 'Exact (Case Sensitive)', value: 'exact' })).addIntegerOption(opt => opt.setName('cooldown').setDescription('Cooldown in minutes')))
+        .addSubcommand(sub => sub.setName('remove').setDescription('Remove a keyword').addStringOption(opt => opt.setName('keyword').setDescription('Keyword to remove').setRequired(true).setAutocomplete(true)).addChannelOption(opt => opt.setName('channel').setDescription('Channel setting it was saved with')).addStringOption(opt => opt.setName('channel_id').setDescription('OR paste a channel ID')))
+        .addSubcommand(sub => sub.setName('list').setDescription('List your keywords')),
 
     new SlashCommandBuilder()
         .setName('settings')
@@ -82,7 +101,18 @@ const commands = [
         .addSubcommand(sub => sub
             .setName('ignore_channel')
             .setDescription('Ignore alerts from a channel')
-            .addChannelOption(opt => opt.setName('channel').setDescription('Channel to ignore').setRequired(true).addChannelTypes(ChannelType.GuildText)))
+            .addChannelOption(opt => opt.setName('channel').setDescription('Select a channel from the list').addChannelTypes(
+                ChannelType.GuildText, 
+                ChannelType.GuildAnnouncement, 
+                ChannelType.GuildVoice, 
+                ChannelType.GuildStageVoice, 
+                ChannelType.PublicThread, 
+                ChannelType.PrivateThread, 
+                ChannelType.AnnouncementThread,
+                ChannelType.GuildForum,
+                ChannelType.GuildMedia
+            ))
+            .addStringOption(opt => opt.setName('channel_id').setDescription('OR paste a channel ID directly')))
         .addSubcommand(sub => sub
             .setName('view')
             .setDescription('View your ignore lists and snooze status')),
@@ -165,33 +195,49 @@ async function checkAIRelevance(messageContent, userContext) {
 
 // --- INTERACTION HANDLING ---
 client.on('interactionCreate', async interaction => {
+    if (interaction.isAutocomplete()) {
+        const { commandName, options, user } = interaction;
+        if (commandName === 'keywords' || commandName === 'keyword') {
+            const focusedOption = options.getFocused(true);
+            if (focusedOption.name === 'keyword') {
+                const u = getUser(user.id);
+                const choices = u.keywords.map(k => k.keyword);
+                const filtered = choices.filter(choice => choice.startsWith(focusedOption.value.toLowerCase())).slice(0, 25);
+                await interaction.respond(filtered.map(choice => ({ name: choice, value: choice })));
+            }
+        }
+        return;
+    }
+
     if (!interaction.isChatInputCommand()) return;
     const { commandName, options, user } = interaction;
     const userId = user.id;
     const u = getUser(userId);
 
-    if (commandName === 'keywords') {
+    if (commandName === 'keywords' || commandName === 'keyword') {
         const sub = options.getSubcommand();
         if (sub === 'add') {
             const kw = options.getString('keyword').toLowerCase();
             const ch = options.getChannel('channel');
+            const chId = options.getString('channel_id') || ch?.id || null;
             const aiContext = options.getString('ai_context');
             const mode = options.getString('mode') || 'strict';
             const cooldown = options.getInteger('cooldown') || 0;
 
-            if (u.keywords.some(k => k.keyword === kw && k.channelId === (ch?.id || null))) {
+            if (u.keywords.some(k => k.keyword === kw && k.channelId === chId)) {
                 return interaction.reply({ content: 'Keyword already exists with those settings.', ephemeral: true });
             }
 
-            u.keywords.push({ keyword: kw, channelId: ch?.id || null, aiContext, mode, cooldown, lastTriggered: 0 });
+            u.keywords.push({ keyword: kw, channelId: chId, aiContext, mode, cooldown, lastTriggered: 0 });
             saveData();
-            await interaction.reply({ content: `Added **${kw}** (${mode})${ch ? ` in <#${ch.id}>` : ''}${aiContext ? ` with AI Filter: "${aiContext}"` : ''}.`, ephemeral: true });
+            await interaction.reply({ content: `Added **${kw}** (${mode})${chId ? ` in <#${chId}>` : ''}${aiContext ? ` with AI Filter: "${aiContext}"` : ''}.`, ephemeral: true });
         } 
         else if (sub === 'remove') {
             const kw = options.getString('keyword').toLowerCase();
             const ch = options.getChannel('channel');
+            const chId = options.getString('channel_id') || ch?.id || null;
             const startLen = u.keywords.length;
-            u.keywords = u.keywords.filter(k => !(k.keyword === kw && k.channelId === (ch?.id || null)));
+            u.keywords = u.keywords.filter(k => !(k.keyword === kw && k.channelId === chId));
             if (u.keywords.length < startLen) {
                 saveData();
                 await interaction.reply({ content: `Removed **${kw}**.`, ephemeral: true });
@@ -224,12 +270,16 @@ client.on('interactionCreate', async interaction => {
             await interaction.reply({ content: `Ignoring <@${target.id}>.`, ephemeral: true });
         }
         else if (sub === 'ignore_channel') {
-            const target = options.getChannel('channel');
-            if (!u.settings.ignoredChannels.includes(target.id)) {
-                u.settings.ignoredChannels.push(target.id);
+            const ch = options.getChannel('channel');
+            const chId = options.getString('channel_id') || ch?.id;
+            
+            if (!chId) return interaction.reply({ content: 'Please select a channel or provide a channel ID.', ephemeral: true });
+
+            if (!u.settings.ignoredChannels.includes(chId)) {
+                u.settings.ignoredChannels.push(chId);
                 saveData();
             }
-            await interaction.reply({ content: `Ignoring <#${target.id}>.`, ephemeral: true });
+            await interaction.reply({ content: `Ignoring <#${chId}>.`, ephemeral: true });
         }
         else if (sub === 'view') {
             const snoozed = u.settings.snoozeUntil && u.settings.snoozeUntil > Date.now();
