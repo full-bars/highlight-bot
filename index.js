@@ -364,7 +364,14 @@ client.on('messageCreate', async (message) => {
         if (data.settings.ignoredUsers.includes(authorId)) continue;
         if (data.settings.ignoredChannels.includes(channelId)) continue;
 
-        const lastMsg = recentMessages.get(trackedUserId);
+        // Extra Safety: Ignore any channel with sensitive names (staff, mod, admin, log)
+        const channelName = message.channel.name?.toLowerCase() || '';
+        if (channelName.includes('staff') || 
+            channelName.includes('mod') || 
+            channelName.includes('admin') || 
+            channelName.includes('log')) {
+            continue;
+        }
         const lastType = recentTypers.get(trackedUserId);
         const activeMsg = lastMsg && lastMsg.channelId === channelId && (Date.now() - lastMsg.timestamp < 60000);
         const activeType = lastType && lastType.channelId === channelId && (Date.now() - lastType.timestamp < 60000);
