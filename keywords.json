@@ -1,86 +1,203 @@
 {
-  "977054521035472906": [
-    {
-      "keyword": "707",
-      "channelId": null
+  "users": {
+    "977054521035472906": {
+      "keywords": [
+        {
+          "keyword": "707",
+          "channelId": null,
+          "mode": "strict",
+          "cooldown": 0,
+          "lastTriggered": 0
+        }
+      ],
+      "settings": {
+        "snoozeUntil": null,
+        "ignoredUsers": [],
+        "ignoredChannels": []
+      },
+      "stats": {}
+    },
+    "286980592623681537": {
+      "keywords": [
+        {
+          "keyword": "stranden",
+          "channelId": null,
+          "mode": "strict",
+          "cooldown": 0,
+          "lastTriggered": 0
+        },
+        {
+          "keyword": "imminent",
+          "channelId": null,
+          "mode": "strict",
+          "cooldown": 0,
+          "lastTriggered": 0
+        }
+      ],
+      "settings": {
+        "snoozeUntil": null,
+        "ignoredUsers": [],
+        "ignoredChannels": []
+      },
+      "stats": {}
+    },
+    "324652470565601280": {
+      "keywords": [
+        {
+          "keyword": "otg",
+          "channelId": null,
+          "mode": "strict",
+          "cooldown": 0,
+          "lastTriggered": 0
+        },
+        {
+          "keyword": "observed",
+          "channelId": null,
+          "mode": "strict",
+          "cooldown": 0,
+          "lastTriggered": 0
+        },
+        {
+          "keyword": "pds",
+          "channelId": null,
+          "mode": "strict",
+          "cooldown": 0,
+          "lastTriggered": 0
+        },
+        {
+          "keyword": "sigma",
+          "channelId": null,
+          "mode": "strict",
+          "cooldown": 0,
+          "lastTriggered": 0
+        }
+      ],
+      "settings": {
+        "snoozeUntil": null,
+        "ignoredUsers": [],
+        "ignoredChannels": []
+      },
+      "stats": {}
+    },
+    "610660046128283670": {
+      "keywords": [
+        {
+          "keyword": "forrest",
+          "channelId": null,
+          "mode": "strict",
+          "cooldown": 0,
+          "lastTriggered": 0
+        },
+        {
+          "keyword": "otg",
+          "channelId": null,
+          "mode": "strict",
+          "cooldown": 0,
+          "lastTriggered": 0
+        },
+        {
+          "keyword": "observed",
+          "channelId": null,
+          "mode": "strict",
+          "cooldown": 0,
+          "lastTriggered": 0
+        }
+      ],
+      "settings": {
+        "snoozeUntil": null,
+        "ignoredUsers": [],
+        "ignoredChannels": []
+      },
+      "stats": {}
+    },
+    "970859736838844416": {
+      "keywords": [
+        {
+          "keyword": "tamster",
+          "channelId": null,
+          "mode": "strict",
+          "cooldown": 0,
+          "lastTriggered": 0
+        }
+      ],
+      "settings": {
+        "snoozeUntil": null,
+        "ignoredUsers": [],
+        "ignoredChannels": []
+      },
+      "stats": {}
+    },
+    "1183236283263352934": {
+      "keywords": [
+        {
+          "keyword": "seal",
+          "channelId": null,
+          "mode": "strict",
+          "cooldown": 0,
+          "lastTriggered": 0
+        }
+      ],
+      "settings": {
+        "snoozeUntil": null,
+        "ignoredUsers": [],
+        "ignoredChannels": []
+      },
+      "stats": {}
+    },
+    "334343661938802698": {
+      "keywords": [
+        {
+          "keyword": "wedge",
+          "channelId": null,
+          "mode": "strict",
+          "cooldown": 0,
+          "lastTriggered": 0
+        },
+        {
+          "keyword": "otg",
+          "channelId": null,
+          "mode": "strict",
+          "cooldown": 0,
+          "lastTriggered": 0
+        },
+        {
+          "keyword": "confirmed",
+          "channelId": null,
+          "mode": "strict",
+          "cooldown": 0,
+          "lastTriggered": 0
+        }
+      ],
+      "settings": {
+        "snoozeUntil": null,
+        "ignoredUsers": [],
+        "ignoredChannels": []
+      },
+      "stats": {}
+    },
+    "664632656155377684": {
+      "keywords": [
+        {
+          "keyword": "ava",
+          "channelId": null,
+          "mode": "strict",
+          "cooldown": 0,
+          "lastTriggered": 0
+        },
+        {
+          "keyword": "tornado",
+          "channelId": null,
+          "mode": "strict",
+          "cooldown": 0,
+          "lastTriggered": 0
+        }
+      ],
+      "settings": {
+        "snoozeUntil": null,
+        "ignoredUsers": [],
+        "ignoredChannels": []
+      },
+      "stats": {}
     }
-  ],
-  "286980592623681537": [
-    {
-      "keyword": "stranden",
-      "channelId": null
-    },
-    {
-      "keyword": "imminent",
-      "channelId": null
-    }
-  ],
-  "324652470565601280": [
-    {
-      "keyword": "otg",
-      "channelId": null
-    },
-    {
-      "keyword": "observed",
-      "channelId": null
-    },
-    {
-      "keyword": "pds",
-      "channelId": null
-    },
-    {
-      "keyword": "sigma",
-      "channelId": null
-    }
-  ],
-  "610660046128283670": [
-    {
-      "keyword": "forrest",
-      "channelId": null
-    },
-    {
-      "keyword": "otg",
-      "channelId": null
-    },
-    {
-      "keyword": "observed",
-      "channelId": null
-    }
-  ],
-  "970859736838844416": [
-    {
-      "keyword": "tamster",
-      "channelId": null
-    }
-  ],
-  "1183236283263352934": [
-    {
-      "keyword": "seal",
-      "channelId": null
-    }
-  ],
-  "334343661938802698": [
-    {
-      "keyword": "wedge",
-      "channelId": null
-    },
-    {
-      "keyword": "otg",
-      "channelId": null
-    },
-    {
-      "keyword": "confirmed",
-      "channelId": null
-    }
-  ],
-  "664632656155377684": [
-    {
-      "keyword": "ava",
-      "channelId": null
-    },
-    {
-      "keyword": "tornado",
-      "channelId": null
-    }
-  ]
+  }
 }
