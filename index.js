@@ -1,6 +1,6 @@
-const { Client, GatewayIntentBits, EmbedBuilder, PermissionsBitField, REST, Routes, SlashCommandBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, PermissionsBitField, REST, Routes, SlashCommandBuilder, ChannelType } = require('discord.js');
 const fs = require('fs');
-require('dotenv').config(); // Loads bot token from .env file
+require('dotenv').config();
 
 const client = new Client({
     intents: [
@@ -10,260 +10,334 @@ const client = new Client({
         GatewayIntentBits.DirectMessages,
         GatewayIntentBits.GuildPresences,
         GatewayIntentBits.GuildMembers,
-        GatewayIntentBits.GuildMessageTyping // Needed for typing detection
+        GatewayIntentBits.GuildMessageTyping
     ]
 });
 
-console.log("Loaded .env file. Token found:", process.env.TOKEN ? "YES" : "NO");
+const DATA_FILE = 'keywords.json';
+let userData = { users: {} };
 
-const KEYWORDS_FILE = 'keywords.json';
-let userKeywords = {};
-
-// Track recent activity (messages and typing)
-const recentMessages = new Map();
-const recentTypers = new Map();
-const ACTIVITY_THRESHOLD = 60000; // 60 seconds
-
-// Load keywords from file if it exists
-if (fs.existsSync(KEYWORDS_FILE)) {
-    userKeywords = JSON.parse(fs.readFileSync(KEYWORDS_FILE, 'utf8'));
+// --- DATA MIGRATION ---
+if (fs.existsSync(DATA_FILE)) {
+    const rawData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+    // Check if it's the old format (userId as top-level keys)
+    if (!rawData.users) {
+        console.log("Migrating old keywords.json to new format...");
+        fs.writeFileSync(DATA_FILE + '.bak', JSON.stringify(rawData, null, 2));
+        Object.entries(rawData).forEach(([userId, keywords]) => {
+            userData.users[userId] = {
+                keywords: keywords.map(kw => ({
+                    keyword: typeof kw === 'string' ? kw : kw.keyword,
+                    channelId: typeof kw === 'string' ? null : kw.channelId,
+                    mode: 'strict',
+                    cooldown: 0,
+                    lastTriggered: 0
+                })),
+                settings: {
+                    snoozeUntil: null,
+                    ignoredUsers: [],
+                    ignoredChannels: []
+                },
+                stats: {}
+            };
+        });
+        fs.writeFileSync(DATA_FILE, JSON.stringify(userData, null, 2));
+    } else {
+        userData = rawData;
+    }
 }
 
-// Define Slash Commands
+const saveData = () => fs.writeFileSync(DATA_FILE, JSON.stringify(userData, null, 2));
+
+// Track recent activity
+const recentMessages = new Map(); // userId -> { channelId, timestamp }
+const recentTypers = new Map();   // userId -> { channelId, timestamp }
+
+// --- SLASH COMMANDS DEFINITION ---
 const commands = [
     new SlashCommandBuilder()
         .setName('keywords')
         .setDescription('Manage your keywords')
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('add')
-                .setDescription('Add a new keyword to track')
-                .addStringOption(option => option.setName('keyword').setDescription('The keyword to track').setRequired(true))
-                .addChannelOption(option => option.setName('channel').setDescription('Limit to a specific channel (optional)')))
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('remove')
-                .setDescription('Remove a tracked keyword')
-                .addStringOption(option => option.setName('keyword').setDescription('The keyword to remove').setRequired(true))
-                .addChannelOption(option => option.setName('channel').setDescription('The channel the keyword was limited to (if any)')))
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('list')
-                .setDescription('List all your tracked keywords')),
-].map(command => command.toJSON());
+        .addSubcommand(sub => sub
+            .setName('add')
+            .setDescription('Add a keyword')
+            .addStringOption(opt => opt.setName('keyword').setDescription('Keyword to track').setRequired(true))
+            .addChannelOption(opt => opt.setName('channel').setDescription('Specific channel only').addChannelTypes(ChannelType.GuildText))
+            .addStringOption(opt => opt.setName('mode').setDescription('Matching mode').addChoices(
+                { name: 'Strict (Whole Word)', value: 'strict' },
+                { name: 'Loose (Anywhere)', value: 'loose' },
+                { name: 'Exact (Case Sensitive)', value: 'exact' }
+            ))
+            .addIntegerOption(opt => opt.setName('cooldown').setDescription('Cooldown in minutes')))
+        .addSubcommand(sub => sub
+            .setName('remove')
+            .setDescription('Remove a keyword')
+            .addStringOption(opt => opt.setName('keyword').setDescription('Keyword to remove').setRequired(true))
+            .addChannelOption(opt => opt.setName('channel').setDescription('Channel setting it was saved with')))
+        .addSubcommand(sub => sub
+            .setName('list')
+            .setDescription('List your keywords')),
+
+    new SlashCommandBuilder()
+        .setName('settings')
+        .setDescription('Bot settings')
+        .addSubcommand(sub => sub
+            .setName('snooze')
+            .setDescription('Snooze notifications')
+            .addIntegerOption(opt => opt.setName('minutes').setDescription('Minutes to snooze').setRequired(true)))
+        .addSubcommand(sub => sub
+            .setName('ignore_user')
+            .setDescription('Ignore alerts from a user')
+            .addUserOption(opt => opt.setName('user').setDescription('User to ignore').setRequired(true)))
+        .addSubcommand(sub => sub
+            .setName('ignore_channel')
+            .setDescription('Ignore alerts from a channel')
+            .addChannelOption(opt => opt.setName('channel').setDescription('Channel to ignore').setRequired(true).addChannelTypes(ChannelType.GuildText)))
+        .addSubcommand(sub => sub
+            .setName('view')
+            .setDescription('View your ignore lists and snooze status'))
+        .addSubcommand(sub => sub
+            .setName('unignore_user')
+            .setDescription('Stop ignoring a user')
+            .addUserOption(opt => opt.setName('user').setDescription('User to unignore').setRequired(true)))
+        .addSubcommand(sub => sub
+            .setName('unignore_channel')
+            .setDescription('Stop ignoring a channel')
+            .addChannelOption(opt => opt.setName('channel').setDescription('Channel to unignore').setRequired(true))),
+
+    new SlashCommandBuilder()
+        .setName('stats')
+        .setDescription('View your highlight statistics')
+].map(c => c.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
 
 client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}!`);
-
     try {
-        console.log('Started refreshing application (/) commands.');
-        await rest.put(
-            Routes.applicationCommands(client.user.id),
-            { body: commands },
-        );
-        console.log('Successfully reloaded application (/) commands.');
-    } catch (error) {
-        console.error(error);
-    }
+        await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
+        console.log('Slash commands registered.');
+    } catch (e) { console.error(e); }
 });
 
-// Handle Slash Commands
+// --- HELPER FUNCTIONS ---
+function getUser(userId) {
+    if (!userData.users[userId]) {
+        userData.users[userId] = {
+            keywords: [],
+            settings: { snoozeUntil: null, ignoredUsers: [], ignoredChannels: [] },
+            stats: {}
+        };
+    }
+    return userData.users[userId];
+}
+
+function getMatchRegex(keyword, mode) {
+    switch (mode) {
+        case 'loose': return new RegExp(keyword, 'i');
+        case 'exact': return new RegExp(`\\b${keyword}\\b`); // Case sensitive
+        case 'strict':
+        default: return new RegExp(`\\b${keyword}\\b`, 'i');
+    }
+}
+
+// --- INTERACTION HANDLING ---
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
-
-    const { commandName, options, user } = interaction;
-    const userId = user.id;
+    const { commandName, options, user, userId = user.id } = interaction;
+    const u = getUser(userId);
 
     if (commandName === 'keywords') {
-        const subcommand = options.getSubcommand();
+        const sub = options.getSubcommand();
+        if (sub === 'add') {
+            const kw = options.getString('keyword').toLowerCase();
+            const ch = options.getChannel('channel');
+            const mode = options.getString('mode') || 'strict';
+            const cooldown = options.getInteger('cooldown') || 0;
 
-        if (subcommand === 'add') {
-            const keyword = options.getString('keyword').toLowerCase();
-            const channel = options.getChannel('channel');
-            const channelIdToLimit = channel ? channel.id : null;
-
-            if (!userKeywords[userId]) userKeywords[userId] = [];
-
-            const alreadyExists = userKeywords[userId].some(kwObj => 
-                kwObj.keyword === keyword && kwObj.channelId === channelIdToLimit
-            );
-
-            if (!alreadyExists) {
-                userKeywords[userId].push({ keyword: keyword, channelId: channelIdToLimit });
-                fs.writeFileSync(KEYWORDS_FILE, JSON.stringify(userKeywords, null, 2));
-                const channelText = channelIdToLimit ? ` in <#${channelIdToLimit}>` : "";
-                await interaction.reply({ content: `Added keyword: **${keyword}**${channelText}`, ephemeral: true });
-            } else {
-                await interaction.reply({ content: 'That keyword is already being tracked with those settings.', ephemeral: true });
+            if (u.keywords.some(k => k.keyword === kw && k.channelId === (ch?.id || null))) {
+                return interaction.reply({ content: 'Keyword already exists with those settings.', ephemeral: true });
             }
+
+            u.keywords.push({ keyword: kw, channelId: ch?.id || null, mode, cooldown, lastTriggered: 0 });
+            saveData();
+            await interaction.reply({ content: `Added **${kw}** (${mode})${ch ? ` in <#${ch.id}>` : ''}${cooldown ? ` with ${cooldown}m cooldown` : ''}.`, ephemeral: true });
         } 
+        else if (sub === 'remove') {
+            const kw = options.getString('keyword').toLowerCase();
+            const ch = options.getChannel('channel');
+            const startLen = u.keywords.length;
+            u.keywords = u.keywords.filter(k => !(k.keyword === kw && k.channelId === (ch?.id || null)));
+            if (u.keywords.length < startLen) {
+                saveData();
+                await interaction.reply({ content: `Removed **${kw}**.`, ephemeral: true });
+            } else {
+                await interaction.reply({ content: 'Keyword not found.', ephemeral: true });
+            }
+        }
+        else if (sub === 'list') {
+            if (!u.keywords.length) return interaction.reply({ content: 'No keywords tracked.', ephemeral: true });
+            const list = u.keywords.map(k => `- **${k.keyword}** [${k.mode}]${k.channelId ? ` in <#${k.channelId}>` : ''}${k.cooldown ? ` (${k.cooldown}m cd)` : ''}`).join('\n');
+            const embed = new EmbedBuilder().setTitle('Your Keywords').setDescription(list).setColor(0x5865F2);
+            await interaction.reply({ embeds: [embed], ephemeral: true });
+        }
+    }
+
+    if (commandName === 'settings') {
+        const sub = options.getSubcommand();
+        if (sub === 'snooze') {
+            const mins = options.getInteger('minutes');
+            u.settings.snoozeUntil = Date.now() + (mins * 60000);
+            saveData();
+            await interaction.reply({ content: `Snoozed for ${mins} minutes.`, ephemeral: true });
+        }
+        else if (sub === 'ignore_user') {
+            const target = options.getUser('user');
+            if (!u.settings.ignoredUsers.includes(target.id)) {
+                u.settings.ignoredUsers.push(target.id);
+                saveData();
+            }
+            await interaction.reply({ content: `Ignoring <@${target.id}>.`, ephemeral: true });
+        }
+        else if (sub === 'ignore_channel') {
+            const target = options.getChannel('channel');
+            if (!u.settings.ignoredChannels.includes(target.id)) {
+                u.settings.ignoredChannels.push(target.id);
+                saveData();
+            }
+            await interaction.reply({ content: `Ignoring <#${target.id}>.`, ephemeral: true });
+        }
+        else if (sub === 'unignore_user') {
+            const target = options.getUser('user');
+            u.settings.ignoredUsers = u.settings.ignoredUsers.filter(id => id !== target.id);
+            saveData();
+            await interaction.reply({ content: `Stopped ignoring <@${target.id}>.`, ephemeral: true });
+        }
+        else if (sub === 'unignore_channel') {
+            const target = options.getChannel('channel');
+            u.settings.ignoredChannels = u.settings.ignoredChannels.filter(id => id !== target.id);
+            saveData();
+            await interaction.reply({ content: `Stopped ignoring <#${target.id}>.`, ephemeral: true });
+        }
+        else if (sub === 'view') {
+            const snoozed = u.settings.snoozeUntil && u.settings.snoozeUntil > Date.now();
+            const snoozeText = snoozed ? `Active until <t:${Math.floor(u.settings.snoozeUntil / 1000)}:R>` : 'Inactive';
+            const users = u.settings.ignoredUsers.length ? u.settings.ignoredUsers.map(id => `<@${id}>`).join(', ') : 'None';
+            const channels = u.settings.ignoredChannels.length ? u.settings.ignoredChannels.map(id => `<#${id}>`).join(', ') : 'None';
+            
+            const embed = new EmbedBuilder()
+                .setTitle('Your Settings')
+                .addFields(
+                    { name: 'Snooze', value: snoozeText },
+                    { name: 'Ignored Users', value: users },
+                    { name: 'Ignored Channels', value: channels }
+                ).setColor(0x5865F2);
+            await interaction.reply({ embeds: [embed], ephemeral: true });
+        }
+    }
+
+    if (commandName === 'stats') {
+        const statsArray = Object.entries(u.stats).sort((a, b) => b[1].triggers - a[1].triggers);
+        if (!statsArray.length) return interaction.reply({ content: 'No stats available yet.', ephemeral: true });
         
-        else if (subcommand === 'remove') {
-            const keyword = options.getString('keyword').toLowerCase();
-            const channel = options.getChannel('channel');
-            const channelIdToRemove = channel ? channel.id : null;
-
-            if (userKeywords[userId]) {
-                const originalLength = userKeywords[userId].length;
-                userKeywords[userId] = userKeywords[userId].filter(kwObj => 
-                    !(kwObj.keyword === keyword && kwObj.channelId === channelIdToRemove)
-                );
-                
-                if (userKeywords[userId].length < originalLength) {
-                    fs.writeFileSync(KEYWORDS_FILE, JSON.stringify(userKeywords, null, 2));
-                    const channelText = channelIdToRemove ? ` in <#${channelIdToRemove}>` : "";
-                    await interaction.reply({ content: `Removed keyword: **${keyword}**${channelText}`, ephemeral: true });
-                } else {
-                    await interaction.reply({ content: 'That keyword was not in your list.', ephemeral: true });
-                }
-            } else {
-                await interaction.reply({ content: 'You have no keywords.', ephemeral: true });
-            }
-        }
-
-        else if (subcommand === 'list') {
-            if (userKeywords[userId] && userKeywords[userId].length > 0) {
-                const list = userKeywords[userId].map(kw => 
-                    `- **${kw.keyword}**${kw.channelId ? ` in <#${kw.channelId}>` : ""}`
-                ).join('\n');
-                
-                const embed = new EmbedBuilder()
-                    .setTitle('Your Tracked Keywords')
-                    .setDescription(list)
-                    .setColor(0x5865F2);
-                
-                await interaction.reply({ embeds: [embed], ephemeral: true });
-            } else {
-                await interaction.reply({ content: 'You have no keywords tracked.', ephemeral: true });
-            }
-        }
+        const desc = statsArray.map(([kw, data]) => `**${kw}**: ${data.triggers} triggers (Last: <t:${Math.floor(data.lastTriggered / 1000)}:R>)`).join('\n');
+        const total = statsArray.reduce((acc, curr) => acc + curr[1].triggers, 0);
+        
+        const embed = new EmbedBuilder()
+            .setTitle('Highlight Stats')
+            .setDescription(desc)
+            .setFooter({ text: `Total Highlights: ${total}` })
+            .setColor(0x5865F2);
+        await interaction.reply({ embeds: [embed], ephemeral: true });
     }
 });
 
-// Listen for new messages
+// --- MESSAGE TRIGGER LOGIC ---
 client.on('messageCreate', async (message) => {
-    if (message.author.bot) return;
+    if (message.author.bot || !message.guild) return;
 
-    const userId = message.author.id;
+    const authorId = message.author.id;
     const channelId = message.channel.id;
 
-    recentMessages.set(userId, { channel: channelId, timestamp: Date.now() });
+    // Track activity
+    recentMessages.set(authorId, { channelId, timestamp: Date.now() });
 
-    // Legacy Command Support (Keep existing logic if you want both, or remove if moving entirely to slash)
-    if (message.content.startsWith('!addkeyword ')) {
-        const parts = message.content.split(' ');
-        let keyword;
-        let channelIdToLimit = null;
+    for (const [trackedUserId, data] of Object.entries(userData.users)) {
+        if (trackedUserId === authorId) continue;
 
-        const channelMention = parts[parts.length - 1].match(/^<#(\d+)>$/);
-        if (channelMention) {
-            channelIdToLimit = channelMention[1];
-            keyword = parts.slice(1, -1).join(' ').toLowerCase();
-        } else {
-            keyword = parts.slice(1).join(' ').toLowerCase();
-        }
+        // 1. Check Snooze
+        if (data.settings.snoozeUntil && data.settings.snoozeUntil > Date.now()) continue;
 
-        if (!userKeywords[userId]) userKeywords[userId] = [];
-        const alreadyExists = userKeywords[userId].some(kwObj => kwObj.keyword === keyword && kwObj.channelId === channelIdToLimit);
+        // 2. Check Blacklists
+        if (data.settings.ignoredUsers.includes(authorId)) continue;
+        if (data.settings.ignoredChannels.includes(channelId)) continue;
 
-        if (!alreadyExists) {
-            userKeywords[userId].push({ keyword: keyword, channelId: channelIdToLimit });
-            fs.writeFileSync(KEYWORDS_FILE, JSON.stringify(userKeywords, null, 2));
-            const channelText = channelIdToLimit ? ` in <#${channelIdToLimit}>` : "";
-            message.reply(`Added keyword: **${keyword}**${channelText}`);
-        } else {
-            message.reply('That keyword is already being tracked with those settings.');
-        }
-        return;
-    }
+        // 3. Smart Notifications: Skip if user is active in this channel
+        const lastMsg = recentMessages.get(trackedUserId);
+        const lastType = recentTypers.get(trackedUserId);
+        const activeMsg = lastMsg && lastMsg.channelId === channelId && (Date.now() - lastMsg.timestamp < 60000);
+        const activeType = lastType && lastType.channelId === channelId && (Date.now() - lastType.timestamp < 60000);
+        if (activeMsg || activeType) continue;
 
-    if (message.content.startsWith('!removekeyword ')) {
-        const parts = message.content.split(' ');
-        let keyword;
-        let channelIdToRemove = null;
+        // 4. Match Keywords
+        const triggerKw = data.keywords.find(k => {
+            if (k.channelId && k.channelId !== channelId) return false;
+            
+            // Cooldown check
+            if (k.cooldown && k.lastTriggered && (Date.now() - k.lastTriggered < k.cooldown * 60000)) return false;
 
-        const channelMention = parts[parts.length - 1].match(/^<#(\d+)>$/);
-        if (channelMention) {
-            channelIdToRemove = channelMention[1];
-            keyword = parts.slice(1, -1).join(' ').toLowerCase();
-        } else {
-            keyword = parts.slice(1).join(' ').toLowerCase();
-        }
-
-        if (userKeywords[userId]) {
-            const originalLength = userKeywords[userId].length;
-            userKeywords[userId] = userKeywords[userId].filter(kwObj => !(kwObj.keyword === keyword && kwObj.channelId === channelIdToRemove));
-            if (userKeywords[userId].length < originalLength) {
-                fs.writeFileSync(KEYWORDS_FILE, JSON.stringify(userKeywords, null, 2));
-                const channelText = channelIdToRemove ? ` in <#${channelIdToRemove}>` : "";
-                message.reply(`Removed keyword: **${keyword}**${channelText}`);
-            } else {
-                message.reply('That keyword was not in your list.');
-            }
-        }
-        return;
-    }
-
-    if (message.content === '!listkeywords') {
-        if (userKeywords[userId] && userKeywords[userId].length > 0) {
-            const list = userKeywords[userId].map(kw => `- **${kw.keyword}**${kw.channelId ? ` in <#${kw.channelId}>` : ""}`).join('\n');
-            message.reply(`Your keywords:\n${list}`);
-        } else {
-            message.reply('You have no keywords tracked.');
-        }
-        return;
-    }
-
-    // Check for keyword alerts for all tracked users
-    Object.entries(userKeywords).forEach(async ([trackedUser, userKeywordList]) => {
-        if (trackedUser === userId) return;
-
-        const foundKeywordObj = userKeywordList.find(kwObj => {
-            if (kwObj.channelId && kwObj.channelId !== channelId) return false;
-            return new RegExp(`\\b${kwObj.keyword}\\b`, 'i').test(message.content);
+            const regex = getMatchRegex(k.keyword, k.mode);
+            return regex.test(message.content);
         });
 
-        if (!foundKeywordObj) return;
+        if (!triggerKw) continue;
 
-        const guildMember = message.guild.members.cache.get(trackedUser);
-        if (!guildMember) return;
+        // Verify permissions
+        const guildMember = message.guild.members.cache.get(trackedUserId) || await message.guild.members.fetch(trackedUserId).catch(() => null);
+        if (!guildMember) continue;
+        const perms = message.channel.permissionsFor(guildMember);
+        if (!perms || !perms.has(PermissionsBitField.Flags.ViewChannel)) continue;
 
-        const permissions = message.channel.permissionsFor(guildMember);
-        if (!permissions || !permissions.has(PermissionsBitField.Flags.ViewChannel)) return;
+        // Update stats and cooldown
+        triggerKw.lastTriggered = Date.now();
+        if (!data.stats[triggerKw.keyword]) data.stats[triggerKw.keyword] = { triggers: 0, lastTriggered: 0 };
+        data.stats[triggerKw.keyword].triggers++;
+        data.stats[triggerKw.keyword].lastTriggered = Date.now();
+        saveData();
 
+        // 5. Fetch Context
+        let context = '';
+        try {
+            const messages = await message.channel.messages.fetch({ limit: 3, before: message.id });
+            context = messages.reverse().map(m => `**${m.author.username}**: ${m.content.substring(0, 100)}${m.content.length > 100 ? '...' : ''}`).join('\n');
+        } catch (e) { console.error("Context fetch failed", e); }
+
+        // 6. Send DM
         try {
             const messageLink = `https://discord.com/channels/${message.guild.id}/${message.channel.id}/${message.id}`;
             const embed = new EmbedBuilder()
                 .setColor(0x5865F2)
-                .setAuthor({
-                    name: `In ${message.guild.name} • #${message.channel.name}`,
-                    iconURL: message.guild.iconURL() || ''
-                })
-                .setDescription(`You were highlighted with the word: **${foundKeywordObj.keyword}**`)
+                .setAuthor({ name: `In ${message.guild.name} • #${message.channel.name}`, iconURL: message.guild.iconURL() || '' })
+                .setDescription(`Highlight: **${triggerKw.keyword}**`)
                 .addFields(
-                    { name: `${message.author.tag}`, value: message.content || '*No message content*' },
-                    { name: 'Source Message', value: `[Click to jump](${messageLink})` }
+                    { name: 'Context', value: context || '*No previous messages found*' },
+                    { name: `${message.author.tag}`, value: message.content || '*No content*' },
+                    { name: 'Jump', value: `[Click to jump](${messageLink})` }
                 )
-                .setFooter({ text: 'Triggered' })
                 .setTimestamp();
 
-            const userObj = await client.users.fetch(trackedUser);
+            const userObj = await client.users.fetch(trackedUserId);
             await userObj.send({ embeds: [embed] });
-            console.log(`Sent DM to ${userObj.tag} for keyword "${foundKeywordObj.keyword}" in channel ${message.channel.name}.`);
-        } catch (error) {
-            console.error(`DEBUG: Could not send DM to user ${trackedUser}: ${error}`);
-        }
-    });
+            console.log(`Alerted ${userObj.tag} for "${triggerKw.keyword}"`);
+        } catch (error) { console.error(`Failed to DM ${trackedUserId}: ${error}`); }
+    }
 });
 
-// Track typing activity to avoid duplicate notifications
-client.on('typingStart', (channel, user) => {
-    if (!channel || !user || !user.id) return;
-    recentTypers.set(user.id, { channel: channel.id, timestamp: Date.now() });
+client.on('typingStart', (event) => {
+    if (!event.channel || !event.user) return;
+    recentTypers.set(event.user.id, { channelId: event.channel.id, timestamp: Date.now() });
 });
 
 client.login(process.env.TOKEN)
-    .then(() => console.log("Bot login successful."))
-    .catch(err => console.error("Bot login failed:", err));
+    .then(() => console.log("Bot online."))
+    .catch(err => console.error("Login failed:", err));
