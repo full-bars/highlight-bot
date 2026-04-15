@@ -1,11 +1,13 @@
-# 🚀 Highlight Bot v1.2.1
+# 🚀 Highlight Bot v1.2.2
 
 A powerful, AI-enhanced Discord notification bot that DMs you when specific keywords are mentioned. 
 
 ## ✨ Features
 
-- **Slash Command Management**: Easy to use `/keywords` or `/keyword` (singular) and `/settings` commands.
+- **Slash Command Management**: Easy to use `/keyword` (singular) and `/settings` commands.
 - **🤖 AI Intelligent Filtering**: Use Google Gemini to filter notifications based on your specific context (e.g., "only actual emergency reports").
+- **🔒 Permission-based Privacy**: Users ONLY receive notifications for channels they have permission to view.
+- **🛡️ Extra Layer Security**: Hardcoded ignore for sensitive channel names (staff, mod, admin, log).
 - **Smart Notifications**: Automatically skips DMs if you're already active in the channel.
 - **Contextual Alerts**: DMs include the 3 messages sent before the trigger to provide instant context.
 - **Advanced Matching**: Supports Strict (whole word), Loose (anywhere), and Exact (case-sensitive) modes.
@@ -51,4 +53,4 @@ A powerful, AI-enhanced Discord notification bot that DMs you when specific keyw
 3. **Run**: `node index.js`
 
 ## 🔒 Security
-The bot uses a local `keywords.json` to store settings. Ensure your `.env` is ignored by git (already configured in this repo).
+The bot prioritizes privacy. It uses a local `keywords.json` to store settings and performs **hard permission checks** on every trigger to ensure users never receive highlights from channels they aren't authorized to see. Ensure your `.env` is ignored by git (already configured in this repo).
