@@ -360,11 +360,19 @@ client.on('messageCreate', async (message) => {
 
     for (const [trackedUserId, data] of Object.entries(userData.users)) {
         if (trackedUserId === authorId) continue;
+
+        // 1. HARD PERMISSION CHECK: If the user can't see the channel, they get nothing.
+        const guildMember = await message.guild.members.fetch(trackedUserId).catch(() => null);
+        if (!guildMember) continue;
+        const perms = message.channel.permissionsFor(guildMember);
+        if (!perms || !perms.has(PermissionsBitField.Flags.ViewChannel)) continue;
+
+        // 2. Global/User settings
         if (data.settings.snoozeUntil && data.settings.snoozeUntil > Date.now()) continue;
         if (data.settings.ignoredUsers.includes(authorId)) continue;
         if (data.settings.ignoredChannels.includes(channelId)) continue;
 
-        // Extra Safety: Ignore any channel with sensitive names (staff, mod, admin, log)
+        // 3. Extra Safety: Ignore any channel with sensitive names (staff, mod, admin, log)
         const channelName = message.channel.name?.toLowerCase() || '';
         if (channelName.includes('staff') || 
             channelName.includes('mod') || 
@@ -372,6 +380,8 @@ client.on('messageCreate', async (message) => {
             channelName.includes('log')) {
             continue;
         }
+
+        const lastMsg = recentMessages.get(trackedUserId);
         const lastType = recentTypers.get(trackedUserId);
         const activeMsg = lastMsg && lastMsg.channelId === channelId && (Date.now() - lastMsg.timestamp < 60000);
         const activeType = lastType && lastType.channelId === channelId && (Date.now() - lastType.timestamp < 60000);
@@ -389,11 +399,6 @@ client.on('messageCreate', async (message) => {
             const isRelevant = await checkAIRelevance(message.content, triggerKw.aiContext);
             if (!isRelevant) continue;
         }
-
-        const guildMember = await message.guild.members.fetch(trackedUserId).catch(() => null);
-        if (!guildMember) continue;
-        const perms = message.channel.permissionsFor(guildMember);
-        if (!perms || !perms.has(PermissionsBitField.Flags.ViewChannel)) continue;
 
         triggerKw.lastTriggered = Date.now();
         if (!data.stats[triggerKw.keyword]) data.stats[triggerKw.keyword] = { triggers: 0, lastTriggered: 0 };
