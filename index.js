@@ -1,5 +1,6 @@
 const { Client, GatewayIntentBits, EmbedBuilder, PermissionsBitField, REST, Routes, SlashCommandBuilder, ChannelType } = require('discord.js');
 const fs = require('fs');
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 require('dotenv').config();
 
 const client = new Client({
@@ -14,34 +15,19 @@ const client = new Client({
     ]
 });
 
+// Initialize Gemini AI
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
 const DATA_FILE = 'keywords.json';
 let userData = { users: {} };
 
 // --- DATA MIGRATION ---
 if (fs.existsSync(DATA_FILE)) {
     const rawData = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-    // Check if it's the old format (userId as top-level keys)
     if (!rawData.users) {
-        console.log("Migrating old keywords.json to new format...");
-        fs.writeFileSync(DATA_FILE + '.bak', JSON.stringify(rawData, null, 2));
-        Object.entries(rawData).forEach(([userId, keywords]) => {
-            userData.users[userId] = {
-                keywords: keywords.map(kw => ({
-                    keyword: typeof kw === 'string' ? kw : kw.keyword,
-                    channelId: typeof kw === 'string' ? null : kw.channelId,
-                    mode: 'strict',
-                    cooldown: 0,
-                    lastTriggered: 0
-                })),
-                settings: {
-                    snoozeUntil: null,
-                    ignoredUsers: [],
-                    ignoredChannels: []
-                },
-                stats: {}
-            };
-        });
-        fs.writeFileSync(DATA_FILE, JSON.stringify(userData, null, 2));
+        // Migration handled in previous version
+        userData = { users: {} };
     } else {
         userData = rawData;
     }
@@ -50,8 +36,8 @@ if (fs.existsSync(DATA_FILE)) {
 const saveData = () => fs.writeFileSync(DATA_FILE, JSON.stringify(userData, null, 2));
 
 // Track recent activity
-const recentMessages = new Map(); // userId -> { channelId, timestamp }
-const recentTypers = new Map();   // userId -> { channelId, timestamp }
+const recentMessages = new Map();
+const recentTypers = new Map();
 
 // --- SLASH COMMANDS DEFINITION ---
 const commands = [
@@ -63,6 +49,7 @@ const commands = [
             .setDescription('Add a keyword')
             .addStringOption(opt => opt.setName('keyword').setDescription('Keyword to track').setRequired(true))
             .addChannelOption(opt => opt.setName('channel').setDescription('Specific channel only').addChannelTypes(ChannelType.GuildText))
+            .addStringOption(opt => opt.setName('ai_context').setDescription('AI filtering (e.g., "only actual emergency reports")'))
             .addStringOption(opt => opt.setName('mode').setDescription('Matching mode').addChoices(
                 { name: 'Strict (Whole Word)', value: 'strict' },
                 { name: 'Loose (Anywhere)', value: 'loose' },
@@ -95,15 +82,7 @@ const commands = [
             .addChannelOption(opt => opt.setName('channel').setDescription('Channel to ignore').setRequired(true).addChannelTypes(ChannelType.GuildText)))
         .addSubcommand(sub => sub
             .setName('view')
-            .setDescription('View your ignore lists and snooze status'))
-        .addSubcommand(sub => sub
-            .setName('unignore_user')
-            .setDescription('Stop ignoring a user')
-            .addUserOption(opt => opt.setName('user').setDescription('User to unignore').setRequired(true)))
-        .addSubcommand(sub => sub
-            .setName('unignore_channel')
-            .setDescription('Stop ignoring a channel')
-            .addChannelOption(opt => opt.setName('channel').setDescription('Channel to unignore').setRequired(true))),
+            .setDescription('View your ignore lists and snooze status')),
 
     new SlashCommandBuilder()
         .setName('stats')
@@ -135,16 +114,37 @@ function getUser(userId) {
 function getMatchRegex(keyword, mode) {
     switch (mode) {
         case 'loose': return new RegExp(keyword, 'i');
-        case 'exact': return new RegExp(`\\b${keyword}\\b`); // Case sensitive
+        case 'exact': return new RegExp(`\\b${keyword}\\b`);
         case 'strict':
         default: return new RegExp(`\\b${keyword}\\b`, 'i');
+    }
+}
+
+async function checkAIRelevance(messageContent, userContext) {
+    const prompt = `You are a filter agent for a keyword notification bot. 
+    A user is tracking a keyword and has specified this filtering context: "${userContext}"
+    
+    Message content: "${messageContent}"
+    
+    Based on the context, is this message relevant and worth notifying the user? 
+    Answer ONLY with "YES" or "NO".`;
+
+    try {
+        const result = await model.generateContent(prompt);
+        const response = await result.response;
+        const text = response.text().trim().toUpperCase();
+        return text.includes("YES");
+    } catch (error) {
+        console.error("AI check error:", error);
+        return true; // Notify by default if AI fails
     }
 }
 
 // --- INTERACTION HANDLING ---
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
-    const { commandName, options, user, userId = user.id } = interaction;
+    const { commandName, options, user } = interaction;
+    const userId = user.id;
     const u = getUser(userId);
 
     if (commandName === 'keywords') {
@@ -152,6 +152,7 @@ client.on('interactionCreate', async interaction => {
         if (sub === 'add') {
             const kw = options.getString('keyword').toLowerCase();
             const ch = options.getChannel('channel');
+            const aiContext = options.getString('ai_context');
             const mode = options.getString('mode') || 'strict';
             const cooldown = options.getInteger('cooldown') || 0;
 
@@ -159,9 +160,9 @@ client.on('interactionCreate', async interaction => {
                 return interaction.reply({ content: 'Keyword already exists with those settings.', ephemeral: true });
             }
 
-            u.keywords.push({ keyword: kw, channelId: ch?.id || null, mode, cooldown, lastTriggered: 0 });
+            u.keywords.push({ keyword: kw, channelId: ch?.id || null, aiContext, mode, cooldown, lastTriggered: 0 });
             saveData();
-            await interaction.reply({ content: `Added **${kw}** (${mode})${ch ? ` in <#${ch.id}>` : ''}${cooldown ? ` with ${cooldown}m cooldown` : ''}.`, ephemeral: true });
+            await interaction.reply({ content: `Added **${kw}** (${mode})${ch ? ` in <#${ch.id}>` : ''}${aiContext ? ` with AI Filter: "${aiContext}"` : ''}.`, ephemeral: true });
         } 
         else if (sub === 'remove') {
             const kw = options.getString('keyword').toLowerCase();
@@ -177,7 +178,7 @@ client.on('interactionCreate', async interaction => {
         }
         else if (sub === 'list') {
             if (!u.keywords.length) return interaction.reply({ content: 'No keywords tracked.', ephemeral: true });
-            const list = u.keywords.map(k => `- **${k.keyword}** [${k.mode}]${k.channelId ? ` in <#${k.channelId}>` : ''}${k.cooldown ? ` (${k.cooldown}m cd)` : ''}`).join('\n');
+            const list = u.keywords.map(k => `- **${k.keyword}** [${k.mode}]${k.channelId ? ` in <#${k.channelId}>` : ''}${k.aiContext ? ` (AI Filter: ${k.aiContext})` : ''}`).join('\n');
             const embed = new EmbedBuilder().setTitle('Your Keywords').setDescription(list).setColor(0x5865F2);
             await interaction.reply({ embeds: [embed], ephemeral: true });
         }
@@ -207,18 +208,6 @@ client.on('interactionCreate', async interaction => {
             }
             await interaction.reply({ content: `Ignoring <#${target.id}>.`, ephemeral: true });
         }
-        else if (sub === 'unignore_user') {
-            const target = options.getUser('user');
-            u.settings.ignoredUsers = u.settings.ignoredUsers.filter(id => id !== target.id);
-            saveData();
-            await interaction.reply({ content: `Stopped ignoring <@${target.id}>.`, ephemeral: true });
-        }
-        else if (sub === 'unignore_channel') {
-            const target = options.getChannel('channel');
-            u.settings.ignoredChannels = u.settings.ignoredChannels.filter(id => id !== target.id);
-            saveData();
-            await interaction.reply({ content: `Stopped ignoring <#${target.id}>.`, ephemeral: true });
-        }
         else if (sub === 'view') {
             const snoozed = u.settings.snoozeUntil && u.settings.snoozeUntil > Date.now();
             const snoozeText = snoozed ? `Active until <t:${Math.floor(u.settings.snoozeUntil / 1000)}:R>` : 'Inactive';
@@ -239,15 +228,8 @@ client.on('interactionCreate', async interaction => {
     if (commandName === 'stats') {
         const statsArray = Object.entries(u.stats).sort((a, b) => b[1].triggers - a[1].triggers);
         if (!statsArray.length) return interaction.reply({ content: 'No stats available yet.', ephemeral: true });
-        
-        const desc = statsArray.map(([kw, data]) => `**${kw}**: ${data.triggers} triggers (Last: <t:${Math.floor(data.lastTriggered / 1000)}:R>)`).join('\n');
-        const total = statsArray.reduce((acc, curr) => acc + curr[1].triggers, 0);
-        
-        const embed = new EmbedBuilder()
-            .setTitle('Highlight Stats')
-            .setDescription(desc)
-            .setFooter({ text: `Total Highlights: ${total}` })
-            .setColor(0x5865F2);
+        const desc = statsArray.map(([kw, data]) => `**${kw}**: ${data.triggers} triggers`).join('\n');
+        const embed = new EmbedBuilder().setTitle('Highlight Stats').setDescription(desc).setColor(0x5865F2);
         await interaction.reply({ embeds: [embed], ephemeral: true });
     }
 });
@@ -258,77 +240,64 @@ client.on('messageCreate', async (message) => {
 
     const authorId = message.author.id;
     const channelId = message.channel.id;
-
-    // Track activity
     recentMessages.set(authorId, { channelId, timestamp: Date.now() });
 
     for (const [trackedUserId, data] of Object.entries(userData.users)) {
         if (trackedUserId === authorId) continue;
-
-        // 1. Check Snooze
         if (data.settings.snoozeUntil && data.settings.snoozeUntil > Date.now()) continue;
-
-        // 2. Check Blacklists
         if (data.settings.ignoredUsers.includes(authorId)) continue;
         if (data.settings.ignoredChannels.includes(channelId)) continue;
 
-        // 3. Smart Notifications: Skip if user is active in this channel
         const lastMsg = recentMessages.get(trackedUserId);
         const lastType = recentTypers.get(trackedUserId);
         const activeMsg = lastMsg && lastMsg.channelId === channelId && (Date.now() - lastMsg.timestamp < 60000);
         const activeType = lastType && lastType.channelId === channelId && (Date.now() - lastType.timestamp < 60000);
         if (activeMsg || activeType) continue;
 
-        // 4. Match Keywords
         const triggerKw = data.keywords.find(k => {
             if (k.channelId && k.channelId !== channelId) return false;
-            
-            // Cooldown check
             if (k.cooldown && k.lastTriggered && (Date.now() - k.lastTriggered < k.cooldown * 60000)) return false;
-
-            const regex = getMatchRegex(k.keyword, k.mode);
-            return regex.test(message.content);
+            return getMatchRegex(k.keyword, k.mode).test(message.content);
         });
 
         if (!triggerKw) continue;
 
-        // Verify permissions
-        const guildMember = message.guild.members.cache.get(trackedUserId) || await message.guild.members.fetch(trackedUserId).catch(() => null);
+        // --- AI FILTERING ---
+        if (triggerKw.aiContext) {
+            const isRelevant = await checkAIRelevance(message.content, triggerKw.aiContext);
+            if (!isRelevant) continue;
+        }
+
+        const guildMember = await message.guild.members.fetch(trackedUserId).catch(() => null);
         if (!guildMember) continue;
         const perms = message.channel.permissionsFor(guildMember);
         if (!perms || !perms.has(PermissionsBitField.Flags.ViewChannel)) continue;
 
-        // Update stats and cooldown
+        // Update stats
         triggerKw.lastTriggered = Date.now();
         if (!data.stats[triggerKw.keyword]) data.stats[triggerKw.keyword] = { triggers: 0, lastTriggered: 0 };
         data.stats[triggerKw.keyword].triggers++;
         data.stats[triggerKw.keyword].lastTriggered = Date.now();
         saveData();
 
-        // 5. Fetch Context
-        let context = '';
-        try {
-            const messages = await message.channel.messages.fetch({ limit: 3, before: message.id });
-            context = messages.reverse().map(m => `**${m.author.username}**: ${m.content.substring(0, 100)}${m.content.length > 100 ? '...' : ''}`).join('\n');
-        } catch (e) { console.error("Context fetch failed", e); }
-
-        // 6. Send DM
+        // Send DM
         try {
             const messageLink = `https://discord.com/channels/${message.guild.id}/${message.channel.id}/${message.id}`;
+            const messages = await message.channel.messages.fetch({ limit: 3, before: message.id });
+            const context = messages.reverse().map(m => `**${m.author.username}**: ${m.content.substring(0, 100)}`).join('\n');
+
             const embed = new EmbedBuilder()
                 .setColor(0x5865F2)
                 .setAuthor({ name: `In ${message.guild.name} • #${message.channel.name}`, iconURL: message.guild.iconURL() || '' })
-                .setDescription(`Highlight: **${triggerKw.keyword}**`)
+                .setDescription(`AI Highlight: **${triggerKw.keyword}**`)
                 .addFields(
                     { name: 'Context', value: context || '*No previous messages found*' },
                     { name: `${message.author.tag}`, value: message.content || '*No content*' },
                     { name: 'Jump', value: `[Click to jump](${messageLink})` }
-                )
-                .setTimestamp();
+                ).setTimestamp();
 
             const userObj = await client.users.fetch(trackedUserId);
             await userObj.send({ embeds: [embed] });
-            console.log(`Alerted ${userObj.tag} for "${triggerKw.keyword}"`);
         } catch (error) { console.error(`Failed to DM ${trackedUserId}: ${error}`); }
     }
 });
@@ -339,5 +308,5 @@ client.on('typingStart', (event) => {
 });
 
 client.login(process.env.TOKEN)
-    .then(() => console.log("Bot online."))
+    .then(() => console.log("Bot online with AI capabilities."))
     .catch(err => console.error("Login failed:", err));
