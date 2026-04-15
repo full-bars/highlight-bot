@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, EmbedBuilder, PermissionsBitField } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, PermissionsBitField, REST, Routes, SlashCommandBuilder } = require('discord.js');
 const fs = require('fs');
 require('dotenv').config(); // Loads bot token from .env file
 
@@ -29,8 +29,117 @@ if (fs.existsSync(KEYWORDS_FILE)) {
     userKeywords = JSON.parse(fs.readFileSync(KEYWORDS_FILE, 'utf8'));
 }
 
-client.once('ready', () => {
+// Define Slash Commands
+const commands = [
+    new SlashCommandBuilder()
+        .setName('keywords')
+        .setDescription('Manage your keywords')
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('add')
+                .setDescription('Add a new keyword to track')
+                .addStringOption(option => option.setName('keyword').setDescription('The keyword to track').setRequired(true))
+                .addChannelOption(option => option.setName('channel').setDescription('Limit to a specific channel (optional)')))
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('remove')
+                .setDescription('Remove a tracked keyword')
+                .addStringOption(option => option.setName('keyword').setDescription('The keyword to remove').setRequired(true))
+                .addChannelOption(option => option.setName('channel').setDescription('The channel the keyword was limited to (if any)')))
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('list')
+                .setDescription('List all your tracked keywords')),
+].map(command => command.toJSON());
+
+const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
+
+client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}!`);
+
+    try {
+        console.log('Started refreshing application (/) commands.');
+        await rest.put(
+            Routes.applicationCommands(client.user.id),
+            { body: commands },
+        );
+        console.log('Successfully reloaded application (/) commands.');
+    } catch (error) {
+        console.error(error);
+    }
+});
+
+// Handle Slash Commands
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isChatInputCommand()) return;
+
+    const { commandName, options, user } = interaction;
+    const userId = user.id;
+
+    if (commandName === 'keywords') {
+        const subcommand = options.getSubcommand();
+
+        if (subcommand === 'add') {
+            const keyword = options.getString('keyword').toLowerCase();
+            const channel = options.getChannel('channel');
+            const channelIdToLimit = channel ? channel.id : null;
+
+            if (!userKeywords[userId]) userKeywords[userId] = [];
+
+            const alreadyExists = userKeywords[userId].some(kwObj => 
+                kwObj.keyword === keyword && kwObj.channelId === channelIdToLimit
+            );
+
+            if (!alreadyExists) {
+                userKeywords[userId].push({ keyword: keyword, channelId: channelIdToLimit });
+                fs.writeFileSync(KEYWORDS_FILE, JSON.stringify(userKeywords, null, 2));
+                const channelText = channelIdToLimit ? ` in <#${channelIdToLimit}>` : "";
+                await interaction.reply({ content: `Added keyword: **${keyword}**${channelText}`, ephemeral: true });
+            } else {
+                await interaction.reply({ content: 'That keyword is already being tracked with those settings.', ephemeral: true });
+            }
+        } 
+        
+        else if (subcommand === 'remove') {
+            const keyword = options.getString('keyword').toLowerCase();
+            const channel = options.getChannel('channel');
+            const channelIdToRemove = channel ? channel.id : null;
+
+            if (userKeywords[userId]) {
+                const originalLength = userKeywords[userId].length;
+                userKeywords[userId] = userKeywords[userId].filter(kwObj => 
+                    !(kwObj.keyword === keyword && kwObj.channelId === channelIdToRemove)
+                );
+                
+                if (userKeywords[userId].length < originalLength) {
+                    fs.writeFileSync(KEYWORDS_FILE, JSON.stringify(userKeywords, null, 2));
+                    const channelText = channelIdToRemove ? ` in <#${channelIdToRemove}>` : "";
+                    await interaction.reply({ content: `Removed keyword: **${keyword}**${channelText}`, ephemeral: true });
+                } else {
+                    await interaction.reply({ content: 'That keyword was not in your list.', ephemeral: true });
+                }
+            } else {
+                await interaction.reply({ content: 'You have no keywords.', ephemeral: true });
+            }
+        }
+
+        else if (subcommand === 'list') {
+            if (userKeywords[userId] && userKeywords[userId].length > 0) {
+                const list = userKeywords[userId].map(kw => 
+                    `- **${kw.keyword}**${kw.channelId ? ` in <#${kw.channelId}>` : ""}`
+                ).join('\n');
+                
+                const embed = new EmbedBuilder()
+                    .setTitle('Your Tracked Keywords')
+                    .setDescription(list)
+                    .setColor(0x5865F2);
+                
+                await interaction.reply({ embeds: [embed], ephemeral: true });
+            } else {
+                await interaction.reply({ content: 'You have no keywords tracked.', ephemeral: true });
+            }
+        }
+    }
 });
 
 // Listen for new messages
@@ -42,7 +151,7 @@ client.on('messageCreate', async (message) => {
 
     recentMessages.set(userId, { channel: channelId, timestamp: Date.now() });
 
-    // Command to add a keyword
+    // Legacy Command Support (Keep existing logic if you want both, or remove if moving entirely to slash)
     if (message.content.startsWith('!addkeyword ')) {
         const parts = message.content.split(' ');
         let keyword;
@@ -57,10 +166,7 @@ client.on('messageCreate', async (message) => {
         }
 
         if (!userKeywords[userId]) userKeywords[userId] = [];
-        
-        const alreadyExists = userKeywords[userId].some(kwObj => 
-            kwObj.keyword === keyword && kwObj.channelId === channelIdToLimit
-        );
+        const alreadyExists = userKeywords[userId].some(kwObj => kwObj.keyword === keyword && kwObj.channelId === channelIdToLimit);
 
         if (!alreadyExists) {
             userKeywords[userId].push({ keyword: keyword, channelId: channelIdToLimit });
@@ -73,7 +179,6 @@ client.on('messageCreate', async (message) => {
         return;
     }
 
-    // Command to remove a keyword
     if (message.content.startsWith('!removekeyword ')) {
         const parts = message.content.split(' ');
         let keyword;
@@ -89,10 +194,7 @@ client.on('messageCreate', async (message) => {
 
         if (userKeywords[userId]) {
             const originalLength = userKeywords[userId].length;
-            userKeywords[userId] = userKeywords[userId].filter(kwObj => 
-                !(kwObj.keyword === keyword && kwObj.channelId === channelIdToRemove)
-            );
-            
+            userKeywords[userId] = userKeywords[userId].filter(kwObj => !(kwObj.keyword === keyword && kwObj.channelId === channelIdToRemove));
             if (userKeywords[userId].length < originalLength) {
                 fs.writeFileSync(KEYWORDS_FILE, JSON.stringify(userKeywords, null, 2));
                 const channelText = channelIdToRemove ? ` in <#${channelIdToRemove}>` : "";
@@ -100,18 +202,13 @@ client.on('messageCreate', async (message) => {
             } else {
                 message.reply('That keyword was not in your list.');
             }
-        } else {
-            message.reply('You have no keywords.');
         }
         return;
     }
 
-    // Command to list keywords
     if (message.content === '!listkeywords') {
         if (userKeywords[userId] && userKeywords[userId].length > 0) {
-            const list = userKeywords[userId].map(kw => 
-                `- **${kw.keyword}**${kw.channelId ? ` in <#${kw.channelId}>` : ""}`
-            ).join('\n');
+            const list = userKeywords[userId].map(kw => `- **${kw.keyword}**${kw.channelId ? ` in <#${kw.channelId}>` : ""}`).join('\n');
             message.reply(`Your keywords:\n${list}`);
         } else {
             message.reply('You have no keywords tracked.');
@@ -131,20 +228,13 @@ client.on('messageCreate', async (message) => {
         if (!foundKeywordObj) return;
 
         const guildMember = message.guild.members.cache.get(trackedUser);
-        if (!guildMember) {
-            console.log(`DEBUG: Tracked user ${trackedUser} not found in guild ${message.guild.id}.`);
-            return;
-        }
+        if (!guildMember) return;
 
         const permissions = message.channel.permissionsFor(guildMember);
-        if (!permissions || !permissions.has(PermissionsBitField.Flags.ViewChannel)) {
-            console.log(`DEBUG: Skipping notification for user ${trackedUser} - lacks VIEW_CHANNEL permission in channel ${message.channel.name} (ID: ${message.channel.id}).`);
-            return;
-        }
+        if (!permissions || !permissions.has(PermissionsBitField.Flags.ViewChannel)) return;
 
         try {
             const messageLink = `https://discord.com/channels/${message.guild.id}/${message.channel.id}/${message.id}`;
-
             const embed = new EmbedBuilder()
                 .setColor(0x5865F2)
                 .setAuthor({
