@@ -139,14 +139,11 @@ client.once('ready', async () => {
         await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
         console.log('Successfully reloaded application (/) commands globally.');
 
-        // For instant update in testing server, also register to all guilds the bot is in
+        // Clear guild-level commands to prevent duplicates
         client.guilds.cache.forEach(async (guild) => {
             try {
-                await rest.put(Routes.applicationGuildCommands(client.user.id, guild.id), { body: commands });
-                console.log(`Registered commands for guild: ${guild.name} (${guild.id})`);
-            } catch (e) {
-                console.warn(`Failed to register commands for guild ${guild.id}:`, e.message);
-            }
+                await rest.put(Routes.applicationGuildCommands(client.user.id, guild.id), { body: [] });
+            } catch (e) { /* Ignore errors for guilds where we lack perms */ }
         });
 
     } catch (e) { console.error(e); }
