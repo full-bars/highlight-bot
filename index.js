@@ -418,7 +418,7 @@ client.on('messageCreate', async (message) => {
                 .addFields(
                     { name: 'Context', value: context || '*No previous messages found*' },
                     { name: `${message.author.tag}`, value: message.content || '*No content*' },
-                    { name: 'Jump', value: `[Click to jump](${messageLink})` }
+                    { name: 'Source message', value: `[Jump to message](${messageLink})` }
                 ).setTimestamp();
 
             const userObj = await client.users.fetch(trackedUserId);
