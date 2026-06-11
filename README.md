@@ -57,5 +57,4 @@ The bot prioritizes privacy. It uses a local `keywords.json` to store settings a
 
 ## 📝 Changelog
 
-### v1.2.3
-- Standardize message link label across versions for consistency
+See [CHANGELOG.md](CHANGELOG.md) for complete release history and detailed changes.
