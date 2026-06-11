@@ -1,4 +1,4 @@
-# 🚀 Highlight Bot v1.2.2
+# 🚀 Highlight Bot v1.2.3
 
 A powerful, AI-enhanced Discord notification bot that DMs you when specific keywords are mentioned. 
 
@@ -54,3 +54,8 @@ A powerful, AI-enhanced Discord notification bot that DMs you when specific keyw
 
 ## 🔒 Security
 The bot prioritizes privacy. It uses a local `keywords.json` to store settings and performs **hard permission checks** on every trigger to ensure users never receive highlights from channels they aren't authorized to see. Ensure your `.env` is ignored by git (already configured in this repo).
+
+## 📝 Changelog
+
+### v1.2.3
+- Standardize message link label across versions for consistency
